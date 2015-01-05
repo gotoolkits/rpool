@@ -62,9 +62,8 @@ func NewConnPool(name string, max_conns int, max_idle int) *ConnPool {
 
 func (p *ConnPool) Get() (conn io.Closer, err error) {
 	p.Lock()
-	defer p.Unlock()
-
 	if p.conns >= p.MaxConns && len(p.free) == 0 {
+		p.Unlock()
 		debug.Printf("%v max conn reached, pool %v", LOG_TAG, p)
 		return nil, ErrMaxConn
 	}
@@ -77,22 +76,29 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	} else {
 		conn, err = p.New()
 		if err != nil {
+			p.Unlock()
 			return nil, err
 		}
 		new_conn = true
 	}
+	p.Unlock()
 
 	err = p.Ping(conn)
 	if err != nil {
+		p.Lock()
+		debug.Printf("%v ping conn %v fail:%v, pool %v", LOG_TAG, conn, err, p)
 		if !new_conn && p.conns > 0 {
 			p.conns -= 1
 		}
+		p.Unlock()
 		conn.Close()
 		return nil, err
 	}
 	if new_conn {
+		p.Lock()
 		p.conns += 1
 		debug.Printf("%v open new conn %v, pool %v", LOG_TAG, conn, p)
+		p.Unlock()
 	} else {
 		debug.Printf("%v get exist conn %v, pool %v", LOG_TAG, conn, p)
 	}
@@ -100,24 +106,32 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	return conn, nil
 }
 
-func (p *ConnPool) Close(conn io.Closer) error {
+func (p *ConnPool) Release(conn io.Closer) error {
 	p.Lock()
-	defer p.Unlock()
 
-	if conn != nil {
-		if len(p.free) >= p.MaxIdle {
-			debug.Printf("%v auto close %v, pool %v", LOG_TAG, conn, p)
-			conn.Close()
-			p.conns -= 1
-		} else {
-			p.free = append(p.free, conn)
-		}
+	if len(p.free) >= p.MaxIdle {
+		debug.Printf("%v auto close %v, pool %v", LOG_TAG, conn, p)
+		p.conns -= 1
 	} else {
-		if p.conns > 0 {
-			p.conns -= 1
-		}
+		p.free = append(p.free, conn)
 	}
-	debug.Printf("%v return %v, pool %v", LOG_TAG, conn, p)
+	debug.Printf("%v release %v, pool %v", LOG_TAG, conn, p)
+
+	p.Unlock()
+	return nil
+}
+
+func (p *ConnPool) CloseClean(conn io.Closer) error {
+	if conn != nil {
+		conn.Close()
+	}
+	p.Lock()
+	if p.conns > 0 {
+		p.conns -= 1
+	}
+	debug.Printf("%v closeClean %v, pool %v", LOG_TAG, conn, p)
+	p.Unlock()
+
 	return nil
 }
 
