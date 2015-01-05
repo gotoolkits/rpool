@@ -14,9 +14,8 @@ const (
 )
 
 var (
-	debug      debugging   = false
-	ErrMaxConn             = errors.New(MAX_CONN_ERROR)
-	m          *sync.Mutex = new(sync.Mutex)
+	debug      debugging = false
+	ErrMaxConn           = errors.New(MAX_CONN_ERROR)
 )
 
 type debugging bool
@@ -37,6 +36,8 @@ func EnableDebug(f bool) {
 
 // ConnPool manages the life cycle of connections
 type ConnPool struct {
+	sync.Mutex
+
 	// New is used to create a new connection when necessary.
 	New func() (io.Closer, error)
 
@@ -60,8 +61,8 @@ func NewConnPool(name string, max_conns int, max_idle int) *ConnPool {
 }
 
 func (p *ConnPool) Get() (conn io.Closer, err error) {
-	m.Lock()
-	defer m.Unlock()
+	p.Lock()
+	defer p.Unlock()
 
 	if p.conns >= p.MaxConns && len(p.free) == 0 {
 		debug.Printf("%v max conn reached, pool %v", LOG_TAG, p)
@@ -100,8 +101,8 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 }
 
 func (p *ConnPool) Close(conn io.Closer) error {
-	m.Lock()
-	defer m.Unlock()
+	p.Lock()
+	defer p.Unlock()
 
 	if conn != nil {
 		if len(p.free) >= p.MaxIdle {
@@ -121,8 +122,8 @@ func (p *ConnPool) Close(conn io.Closer) error {
 }
 
 func (p *ConnPool) Destroy() {
-	m.Lock()
-	defer m.Unlock()
+	p.Lock()
+	defer p.Unlock()
 
 	for _, conn := range p.free {
 		if conn != nil {
