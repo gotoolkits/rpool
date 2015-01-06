@@ -3,8 +3,8 @@ package conn_pool
 import (
 	"errors"
 	"fmt"
+	"github.com/toolkits/logger"
 	"io"
-	"log"
 	"sync"
 	"time"
 )
@@ -15,24 +15,14 @@ const (
 )
 
 var (
-	debug      debugging = false
-	ErrMaxConn           = errors.New(MAX_CONN_ERROR)
+	slowLogEnabled bool  = false
+	slowLogLimit   int   = 1000
+	ErrMaxConn     error = errors.New(MAX_CONN_ERROR)
 )
 
-type debugging bool
-
-func (t debugging) Printf(format string, args ...interface{}) {
-	if t {
-		log.Printf(format, args...)
-	}
-}
-
-func EnableDebug(f bool) {
-	if f {
-		debug = true
-	} else {
-		debug = false
-	}
+func EnableSlowLog(enabled bool, limit int) {
+	slowLogEnabled = enabled
+	slowLogLimit = limit
 }
 
 // ConnPool manages the life cycle of connections
@@ -62,17 +52,19 @@ func NewConnPool(name string, max_conns int, max_idle int) *ConnPool {
 }
 
 func (p *ConnPool) Get() (conn io.Closer, err error) {
-	if debug {
+	if slowLogEnabled {
 		start_t := time.Now()
 		defer func() {
 			end_t := time.Now()
-			debug.Printf("get_conn_duration: %fms", float64(end_t.UnixNano()-start_t.UnixNano())/1000000)
+			diff := float64(end_t.UnixNano()-start_t.UnixNano()) / 1000000
+			if diff >= float64(slowLogLimit) {
+				logger.Debug("get conn from pool cost too much, duration: %f ms", diff)
+			}
 		}()
 	}
 	p.Lock()
 	if p.conns >= p.MaxConns && len(p.free) == 0 {
 		p.Unlock()
-		debug.Printf("%v max conn reached, pool %v", LOG_TAG, p)
 		return nil, ErrMaxConn
 	}
 
@@ -94,7 +86,7 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	err = p.Ping(conn)
 	if err != nil {
 		p.Lock()
-		debug.Printf("%v ping conn %v fail:%v, pool %v", LOG_TAG, conn, err, p)
+		logger.Trace("%v ping conn %v fail:%v, pool %v", LOG_TAG, conn, err, p)
 		if !new_conn && p.conns > 0 {
 			p.conns -= 1
 		}
@@ -105,10 +97,10 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	if new_conn {
 		p.Lock()
 		p.conns += 1
-		debug.Printf("%v open new conn %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%v open new conn %v, pool %v", LOG_TAG, conn, p)
 		p.Unlock()
 	} else {
-		debug.Printf("%v get exist conn %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%v get existent conn %v, pool %v", LOG_TAG, conn, p)
 	}
 
 	return conn, nil
@@ -118,12 +110,12 @@ func (p *ConnPool) Release(conn io.Closer) error {
 	p.Lock()
 
 	if len(p.free) >= p.MaxIdle {
-		debug.Printf("%v auto close %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%v auto close %v, pool %v", LOG_TAG, conn, p)
 		p.conns -= 1
 	} else {
 		p.free = append(p.free, conn)
 	}
-	debug.Printf("%v release %v, pool %v", LOG_TAG, conn, p)
+	logger.Trace("%v release %v, pool %v", LOG_TAG, conn, p)
 
 	p.Unlock()
 	return nil
@@ -137,7 +129,7 @@ func (p *ConnPool) CloseClean(conn io.Closer) error {
 	if p.conns > 0 {
 		p.conns -= 1
 	}
-	debug.Printf("%v closeClean %v, pool %v", LOG_TAG, conn, p)
+	logger.Trace("%v closeClean %v, pool %v", LOG_TAG, conn, p)
 	p.Unlock()
 
 	return nil
@@ -149,7 +141,7 @@ func (p *ConnPool) Destroy() {
 
 	for _, conn := range p.free {
 		if conn != nil {
-			debug.Printf("%v destroy %v, pool %v", LOG_TAG, conn, p)
+			logger.Trace("%v destroy %v, pool %v", LOG_TAG, conn, p)
 			conn.Close()
 		}
 	}
