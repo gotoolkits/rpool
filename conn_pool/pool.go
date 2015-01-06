@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 )
 
 const (
@@ -61,6 +62,13 @@ func NewConnPool(name string, max_conns int, max_idle int) *ConnPool {
 }
 
 func (p *ConnPool) Get() (conn io.Closer, err error) {
+	if debug {
+		start_t := time.Now()
+		defer func() {
+			end_t := time.Now()
+			debug.Printf("get_conn_duration: %fms", float64(end_t.UnixNano()-start_t.UnixNano())/1000000)
+		}()
+	}
 	p.Lock()
 	if p.conns >= p.MaxConns && len(p.free) == 0 {
 		p.Unlock()
