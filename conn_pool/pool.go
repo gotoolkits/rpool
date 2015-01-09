@@ -58,7 +58,7 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 			end_t := time.Now()
 			diff := float64(end_t.UnixNano()-start_t.UnixNano()) / 1000000
 			if diff >= float64(slowLogLimit) {
-				logger.Debug("get conn from pool cost too much, duration: %f ms", diff)
+				logger.Debug("%s get conn from pool cost too much, duration: %f ms, pool: %+v", LOG_TAG, diff, p)
 			}
 		}()
 	}
@@ -86,7 +86,7 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	err = p.Ping(conn)
 	if err != nil {
 		p.Lock()
-		logger.Trace("%v ping conn %v fail:%v, pool %v", LOG_TAG, conn, err, p)
+		logger.Error("%s ping conn fail: %v, pool: %+v", LOG_TAG, err, p)
 		if !new_conn && p.conns > 0 {
 			p.conns -= 1
 		}
@@ -97,10 +97,10 @@ func (p *ConnPool) Get() (conn io.Closer, err error) {
 	if new_conn {
 		p.Lock()
 		p.conns += 1
-		logger.Trace("%v open new conn %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%s open new conn: %v, pool: %+v", LOG_TAG, conn, p)
 		p.Unlock()
 	} else {
-		logger.Trace("%v get existent conn %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%s get existent conn: %v, pool: %+v", LOG_TAG, conn, p)
 	}
 
 	return conn, nil
@@ -110,12 +110,12 @@ func (p *ConnPool) Release(conn io.Closer) error {
 	p.Lock()
 
 	if len(p.free) >= p.MaxIdle {
-		logger.Trace("%v auto close %v, pool %v", LOG_TAG, conn, p)
+		logger.Trace("%s auto close conn: %v, pool: %+v", LOG_TAG, conn, p)
 		p.conns -= 1
 	} else {
 		p.free = append(p.free, conn)
 	}
-	logger.Trace("%v release %v, pool %v", LOG_TAG, conn, p)
+	logger.Trace("%s release conn: %v, pool: %+v", LOG_TAG, conn, p)
 
 	p.Unlock()
 	return nil
@@ -129,7 +129,7 @@ func (p *ConnPool) CloseClean(conn io.Closer) error {
 	if p.conns > 0 {
 		p.conns -= 1
 	}
-	logger.Trace("%v closeClean %v, pool %v", LOG_TAG, conn, p)
+	logger.Trace("%s close_clean conn: %v, pool: %+v", LOG_TAG, conn, p)
 	p.Unlock()
 
 	return nil
@@ -141,7 +141,7 @@ func (p *ConnPool) Destroy() {
 
 	for _, conn := range p.free {
 		if conn != nil {
-			logger.Trace("%v destroy %v, pool %v", LOG_TAG, conn, p)
+			logger.Trace("%s destroy conn: %v, pool: %+v", LOG_TAG, conn, p)
 			conn.Close()
 		}
 	}
