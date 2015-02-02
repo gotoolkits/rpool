@@ -111,6 +111,9 @@ func (p *ConnPool) Release(conn io.Closer) error {
 
 	if len(p.free) >= p.MaxIdle {
 		logger.Trace("%s auto close conn: %v, pool: %+v", LOG_TAG, conn, p)
+		if conn != nil {
+			conn.Close()
+		}
 		p.conns -= 1
 	} else {
 		p.free = append(p.free, conn)
